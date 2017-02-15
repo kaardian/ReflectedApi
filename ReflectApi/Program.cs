@@ -9,20 +9,27 @@ namespace ReflectedApi
     public static class Config
     {
         public static string OutputFile => @"D:\Temp\Reflection.txt";
-        public static int MaxDepth => 4;
-        public static string Indent => "- ";
+        public static int MaxDepth => 1;
+        public static string Indent => "|";
     }
 
     class Program
     {
         private static Dictionary<string, Type> ProcessedTypes { get; set; }
-
+        public static int TotalCount { get; set; }
         static void Main( string[ ] args )
         {
+            // Set total count to 0.
+            TotalCount = 0;
+
+            // Create dictionary of the processed types, used to prevent processing
+            // same type multiple times.
             ProcessedTypes = new Dictionary<string, Type>();
 
+            // Call process type from Vault object's point of view.
             ProcessType( typeof( Vault ) );
             
+            // Finally output all processed type names.
             foreach ( KeyValuePair<string, Type> processedType in ProcessedTypes )
             {
                 Output( $"{processedType.Value.Name}" );
@@ -50,7 +57,7 @@ namespace ReflectedApi
                 MethodInfo[] methodInfos = typeInterface.GetMethods();
 
                 // Output what we're processing.
-                Output( $"{typeInterface.Name}" );
+                Output( $"{type.Name} {typeInterface.Name}" );
 
                 // Call the iterate methods method.
                 IterateMethods( methodInfos, typeInterface, foundTypes );
@@ -77,9 +84,13 @@ namespace ReflectedApi
         /// <param name="depth"></param>
         private static void IterateMethods( MethodInfo[ ] methodInfos, Type parenType, Dictionary<string, Type> foundTypes, int depth = 1 )
         {
+            // Report progress to command line.
+            TotalCount++;
+            Console.Write( $"\r{TotalCount}" );
+
             // Safety mechanism.
             // If requested depth is deeper than max depth, return.
-            if( depth > Config.MaxDepth )
+            if ( depth > Config.MaxDepth )
                 return;
 
             // Iterate through the methods infos
@@ -90,7 +101,7 @@ namespace ReflectedApi
                 // method like .ToString or so.
                 if ( methodInfo.Name.StartsWith( "get_" ) || methodInfo.Name.StartsWith( "set_" ) ||
                      methodInfo.ReturnType.FullName.StartsWith( "MFilesAPI." ) )
-                    Output( $"{parenType.FullName} {methodInfo.Name} {methodInfo.ReturnType.Name}", depth );
+                    Output( $"{methodInfo.Name} {methodInfo.ReturnType.Name}", depth );
 
                 // If the return type full name starts with MFilesAPI. and it is not same as parent type,
                 // and not yet in the found types dictionary. it is a type that we're interested of.
@@ -100,7 +111,8 @@ namespace ReflectedApi
                 {
                     // Add it to found types dictionary, and call the processing method.
                     foundTypes.Add( methodInfo.ReturnType.FullName, methodInfo.ReturnType );
-                    IterateMethods( methodInfo.ReturnType.GetMethods(), methodInfo.ReturnType, foundTypes, depth + 1 );
+                    // Or don't call... too many nested repeated items...
+                    //IterateMethods( methodInfo.ReturnType.GetMethods(), methodInfo.ReturnType, foundTypes, depth + 1 );
                 }
                 // If the method doesn't start with System. it is something that we might be interested.
                 // Essentially this is a sanity check from earlier iterations where attempting to resolve
@@ -131,7 +143,7 @@ namespace ReflectedApi
                 output = $"{Config.Indent}{output}";
             }
 
-            output = $"{output}{text}";
+            output = $"{output} {text}";
 
             using ( StreamWriter file = new StreamWriter( Config.OutputFile, true ) )
             {
