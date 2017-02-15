@@ -4,48 +4,155 @@ using System.Reflection;
 using MFilesAPI;
 using System.Collections.Generic;
 
-namespace ReflectedApi
+namespace ReflectApi
 {
     public static class Config
     {
         public static string OutputFile => @"D:\Temp\Reflection.txt";
+        public static string WrapeprFile => @"D:\Temp\ApiWrapper.cs";
         public static int MaxDepth => 1;
         public static string Indent => "|";
     }
 
     class Program
     {
-        private static Dictionary<string, Type> ProcessedTypes { get; set; }
+        private static Dictionary< string, Type > ProcessedTypes { get; set; }
         public static int TotalCount { get; set; }
-        static void Main( string[ ] args )
+
+        static void Main( string[] args )
         {
+            // Delete the previous output files.
+            File.Delete( Config.WrapeprFile );
+            File.Delete( Config.OutputFile );
+
             // Set total count to 0.
             TotalCount = 0;
 
             // Create dictionary of the processed types, used to prevent processing
             // same type multiple times.
-            ProcessedTypes = new Dictionary<string, Type>();
+            ProcessedTypes = new Dictionary< string, Type >();
 
             // Call process type from Vault object's point of view.
             ProcessType( typeof( Vault ) );
-            
+
             // Finally output all processed type names.
-            foreach ( KeyValuePair<string, Type> processedType in ProcessedTypes )
+            foreach ( KeyValuePair< string, Type > processedType in ProcessedTypes )
             {
                 Output( $"{processedType.Value.Name}" );
             }
 
+            Console.WriteLine("Processed the interfaces, generating the wrapper.");
+
+            GenerateWrapper();
+
             Console.WriteLine( "Done" );
+        }
+
+        private static void GenerateWrapper()
+        {
+            string indent = "    ";
+            using ( StreamWriter file = new StreamWriter( Config.WrapeprFile, true ) )
+            {
+                file.WriteLine( "using System;" );
+                file.WriteLine( "using MFilesAPI;" );
+                file.WriteLine( "" );
+                file.WriteLine( "namespace xWrappersNew" );
+                file.WriteLine( "{" );
+                file.WriteLine( $"{indent}public class WrappersNew" );
+                file.WriteLine( $"{indent}{{" );
+
+                foreach ( KeyValuePair< string, Type > processedType in ProcessedTypes )
+                {
+                    file.WriteLine($"{indent}{indent}public class x{processedType.Value.Name}");
+                    file.WriteLine($"{indent}{indent}{{");
+
+                    foreach ( Type typeInterface in processedType.Value.GetInterfaces() )
+                    {
+                        foreach ( MethodInfo methodInfo in typeInterface.GetMethods() )
+                        {
+                            if(methodInfo.ReturnType == processedType.Value)
+                                continue;
+
+                            if ( methodInfo.ReturnType.FullName.StartsWith( "MFilesAPI." ) )
+                            {
+                                file.WriteLine( $"{indent}{indent}{indent}public x{methodInfo.ReturnType.Name} {GetMethodName(methodInfo)} {{ get; set; }}" );
+                            }
+                            else if ( methodInfo.ReturnType.FullName.StartsWith( "System." ) )
+                            {
+                                if(methodInfo.ReturnType.Name.ToLower() != "void" )
+                                    file.WriteLine( $"{indent}{indent}{indent}public {methodInfo.ReturnType.Name} {GetMethodName(methodInfo)} {{ get; set; }}" );
+                            }
+                        }
+                        
+                        file.WriteLine( $"{indent}{indent}{indent}public x{processedType.Value.Name}({processedType.Value.Name} apiObj)" );
+                        file.WriteLine($"{indent}{indent}{indent}{{");
+
+                        foreach (MethodInfo methodInfo in typeInterface.GetMethods())
+                        {
+                            if ( methodInfo.ReturnType.Name.ToLower() != "void" && GetMethodName(methodInfo) != processedType.Value.Name && methodInfo.Name.StartsWith("get_"))
+                            {
+                                if(methodInfo.ReturnType.FullName.StartsWith("MFilesAPI."))
+                                    file.WriteLine($"{indent}{indent}{indent}{indent}this.{GetMethodName(methodInfo)} = new x{GetMethodName(methodInfo)}( apiObj.{GetMethodNameForConstructor(methodInfo)} );");
+                                else
+                                    file.WriteLine($"{indent}{indent}{indent}{indent}this.{GetMethodName(methodInfo)} = apiObj.{GetMethodNameForConstructor(methodInfo)};");
+                            }
+                        }       
+                        file.WriteLine($"{indent}{indent}{indent}}}");
+                    }
+                    file.WriteLine($"{indent}{indent}}}");
+                }
+                file.WriteLine( $"{indent}}}" );
+                file.WriteLine( "}" );
+            }
+        }
+
+        /// <summary>
+        /// Parses the method name from method info, removes get_ and set_ prefixes.
+        /// </summary>
+        /// <param name="methodInfo"></param>
+        /// <param name="removeVaultPrefix"></param>
+        /// <returns></returns>
+        private static string GetMethodName( MethodInfo methodInfo )
+        {
+            string methodname = "";
+
+            if ( methodInfo.ReturnType.FullName.StartsWith( "MFilesAPI." ) )
+                methodname = methodInfo.ReturnType.Name;
+            else if ( methodInfo.ReturnType.FullName.StartsWith( "System." ) )
+                methodname = methodInfo.Name;
+
+            if ( methodname.StartsWith( "get_" ) || methodname.StartsWith( "set_" ) )
+                methodname = methodname.Substring( 4, methodname.Length - 4 );
+
+            return methodname;
+        }
+
+        private static string GetMethodNameForConstructor(MethodInfo methodInfo)
+        {
+            string methodname = "";
+
+            if (methodInfo.ReturnType.FullName.StartsWith("MFilesAPI."))
+                methodname = methodInfo.ReturnType.Name;
+            else if (methodInfo.ReturnType.FullName.StartsWith("System."))
+                methodname = methodInfo.Name;
+
+            if (methodname.StartsWith("get_") || methodname.StartsWith("set_"))
+                methodname = methodname.Substring(4, methodname.Length - 4);
+
+            if (methodname.StartsWith("Vault"))
+                methodname = methodname.Substring(5, methodname.Length - 5);
+
+            return methodname;
         }
 
         /// <summary>
         /// Processes the given type.
         /// </summary>
         /// <param name="type"></param>
-        private static void ProcessType(Type type )
+        private static void ProcessType( Type type )
         {
             // Create dictionary for the found types.
-            Dictionary<string, Type> foundTypes = new Dictionary<string, Type>();
+            Dictionary< string, Type > foundTypes = new Dictionary< string, Type >();
 
             // Get interfaces.
             Type[] typeInterfaces = type.GetInterfaces();
@@ -67,10 +174,10 @@ namespace ReflectedApi
             ProcessedTypes.Add( type.FullName, type );
 
             // Iterate through found types.
-            foreach ( KeyValuePair<string, Type> foundType in foundTypes )
+            foreach ( KeyValuePair< string, Type > foundType in foundTypes )
             {
                 // If processed types dictionary doesn't (yet) contain this found type, process it.
-                if(!ProcessedTypes.ContainsKey(foundType.Key))
+                if ( !ProcessedTypes.ContainsKey( foundType.Key ) )
                     ProcessType( foundType.Value );
             }
         }
@@ -81,8 +188,9 @@ namespace ReflectedApi
         /// </summary>
         /// <param name="methodInfos"></param>
         /// <param name="parenType"></param>
+        /// <param name="foundTypes"></param>
         /// <param name="depth"></param>
-        private static void IterateMethods( MethodInfo[ ] methodInfos, Type parenType, Dictionary<string, Type> foundTypes, int depth = 1 )
+        private static void IterateMethods( MethodInfo[] methodInfos, Type parenType, Dictionary< string, Type > foundTypes, int depth = 1 )
         {
             // Report progress to command line.
             TotalCount++;
